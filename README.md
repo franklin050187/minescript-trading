@@ -15,3 +15,6 @@ can be set to scan a specific item
 scan ah and buy item from watch list when price in watchlist is good on the fly
 can be set to scan a specific item
 
+# checker.py
+Compares orders and ah file to find quick profit.
+Warning : some ah item might have been sold, some orders listing might have expired, always double check !
