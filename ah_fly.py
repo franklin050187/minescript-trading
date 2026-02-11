@@ -35,7 +35,7 @@ def ensure_lowest_price():
 
             for block in lore_blocks:
                 if "Lowest Price" in block and "#00FC88" in block:
-                    m.echo("✓ Lowest Price sort is already selected")
+                    # m.echo("✓ Lowest Price sort is already selected")
                     return True
 
             m.echo(
@@ -64,7 +64,7 @@ def init_search_all_ah(item_name):
 
         current_screen = m.screen_name()
         if "Page" not in current_screen:
-            m.echo(f"AH screen not loaded properly. Screen: {current_screen}")
+            # m.echo(f"AH screen not loaded properly. Screen: {current_screen}")
             return []
         if not ensure_lowest_price():
             m.echo("Warning: Could not confirm Lowest Price sort is selected")
@@ -111,14 +111,17 @@ def flatten_lore_line(line) -> str:
         # m.echo(f"Error flattening lore line: {e}")
         return ""
 
-def extract_ah_info_from_item(item) -> dict:
+def extract_ah_info_from_item(item):
     try:
         if not is_valid_order(item):
             return None
 
+        if item.slot >= 45:
+            return None
+
         nbt = lib_nbt.parse_snbt(item.nbt)
 
-        lore = nbt["components"]["minecraft:lore"]
+        lore = nbt["components"].get("minecraft:lore", [])
 
         def flatten(line):
             if isinstance(line, str):
@@ -129,24 +132,60 @@ def extract_ah_info_from_item(item) -> dict:
 
         lines = [flatten(l) for l in lore if l]
 
-        # ignore slot 45 and above since they are not orders
-        if item.slot >= 45:
-            return None
-        
-        # parse remaining quantity
         price = extract_price_from_lore(lines)
         quantity = nbt.get("count", 1)
 
+        # -------------------------------------------------
+        # CASE 1: Normal item
+        # -------------------------------------------------
+        if "shulker_box" not in nbt["id"]:
+            return {
+                "slot": item.slot,
+                "item_id": nbt["id"],
+                "price_total": price,
+                "quantity": quantity,
+                "price_per": price / quantity if quantity > 0 else price
+            }
+
+        # -------------------------------------------------
+        # CASE 2: Shulker box
+        # -------------------------------------------------
+        container_items = nbt["components"].get("minecraft:container", [])
+
+        if not container_items:
+            return None
+
+        # collect unique item ids
+        unique_ids = set()
+        total_quantity = 0
+
+        for entry in container_items:
+            inner_item = entry.get("item", {})
+            inner_id = inner_item.get("id")
+            inner_count = inner_item.get("count", 1)
+
+            if not inner_id:
+                continue
+
+            unique_ids.add(inner_id)
+            total_quantity += inner_count
+
+        # if more than one item type → drop
+        if len(unique_ids) != 1:
+            return None
+
+        # single item type → aggregate
+        single_item_id = unique_ids.pop()
+
         return {
             "slot": item.slot,
-            "item_id": nbt["id"],
+            "item_id": single_item_id,
             "price_total": price,
-            "quantity": quantity,
-            "price_per": price / quantity if quantity > 0 else price
+            "quantity": total_quantity,
+            "price_per": price / total_quantity if total_quantity > 0 else price
         }
 
-    except Exception as e:
-        # m.echo(f"Parse error slot {item.slot}: {e}")
+    except Exception:
         return None
 
 def extract_price_from_lore(lines: list[str]) -> int:
@@ -189,7 +228,7 @@ def search_all_ah(max_pages=100, uid_name="fast"):
         if files:
             latest_file = max(files, key=lambda x: os.path.getctime(os.path.join(r"C:\Users\User\AppData\Roaming\.minecraft\minescript", x)))
             order_path = os.path.join(r"C:\Users\User\AppData\Roaming\.minecraft\minescript", latest_file)
-            print(f"Using most recent orders file: {order_path}")
+            # print(f"Using most recent orders file: {order_path}")
         else:
             print("No orders file found.")
 
@@ -199,19 +238,19 @@ def search_all_ah(max_pages=100, uid_name="fast"):
     )
     
 
-    order_rows = csv.DictReader(open(order_path, "r", encoding="utf-8"))
+    # order_rows = csv.DictReader(open(order_path, "r", encoding="utf-8"))
     watch_rows = csv.DictReader(open(watch_path, "r", encoding="utf-8")) if os.path.exists(watch_path) else []
     all_items = []
     page = 0
     retry_attempts = 0
-    max_retries = 5
-    while page < max_pages:
-        m.echo(f"Page {page + 1} loaded")
+    max_retries = 1
+    while page <= max_pages:
+        # m.echo(f"Page {page + 1} loaded")
         items = m.container_get_items()
         if not items:
-            m.echo(f"⚠ No items found on page {page + 1}, retrying... (attempt {retry_attempts + 1}/{max_retries})")
+            # m.echo(f"⚠ No items found on page {page + 1}, retrying... (attempt {retry_attempts + 1}/{max_retries})")
             if retry_attempts < max_retries - 1:
-                time.sleep(DELAY * (retry_attempts + 1))  # exponential backoff
+                time.sleep(DELAY)  # exponential backoff
                 retry_attempts += 1
                 continue
             else:
@@ -229,8 +268,8 @@ def search_all_ah(max_pages=100, uid_name="fast"):
                 if result:
                     m.echo(f"!!!!!!!!!!!!!!! PROFITABLE TRADE FOUND for slot {order.slot} !!!!!!!!!!!!!!!")
                     m.echo([result])
-                    m.echo([result])
-                    m.echo([result])
+                    # m.echo([result])
+                    # m.echo([result])
                     m.echo(f"!!!!!!!!!!!!!!! PROFITABLE TRADE FOUND for slot {order.slot} !!!!!!!!!!!!!!!")
                     # time.sleep(500)
                     buy_order = buy_item(order.slot)
@@ -238,29 +277,41 @@ def search_all_ah(max_pages=100, uid_name="fast"):
                     if buy_order:
                         m.echo(f"Successfully bought item from slot {order.slot}")
                         # log bough item
-                        log_buy = f"log_buy_{uid_name}.csv"
+                        log_buy = f"log_buy.csv"
                         log_path = os.path.join(
                             r"C:\Users\User\AppData\Roaming\.minecraft\minescript", log_buy
                         )
+                        timestamp = int(time.time())
+                        # display as YYYY-MM-DD:HH:MM:SS
+                        time_of_action = time.strftime("%Y-%m-%d:%H:%M:%S", time.localtime(timestamp))
                         with open(log_path, "a", newline="", encoding="utf-8") as f:
                             writer = csv.writer(f)
-                            writer.writerow([order.slot, data["item_id"], data["price_total"], data["quantity"]])
+                            writer.writerow([order.slot, data["item_id"], data["price_total"], data["quantity"], time_of_action])
                     else:
                         m.echo(f"Failed to buy item from slot {order.slot}")
                     # break  # only buy one item for testing
 
+        # if page >= max_pages:
+        #     m.echo("Reached max_pages limit, stopping.")
+        #     retry_attempts = 0
+        #     break
+
         arrow = next((i for i in items if i.slot == 53 and i.nbt), None)
         if not arrow:
+
             if retry_attempts < max_retries:
-                m.echo(f"⚠ No next page arrow found, retrying... (attempt {retry_attempts + 1}/{max_retries})")
+                # m.echo(f"⚠ No next page arrow found, retrying... (attempt {retry_attempts + 1}/{max_retries})")
                 Inventory.click_slot(49) # refresh page to try to load NBT
                 retry_attempts += 1
-                time.sleep(DELAY*retry_attempts)  # exponential backoff
+                time.sleep(DELAY)  # exponential backoff
 
                 continue
-            m.echo("No next page arrow found, reached end of orders.")
+            # m.echo("No next page arrow found, reached end of orders.")
             break
         retry_attempts = 0
+
+
+
         Inventory.click_slot(53) # click next page
         time.sleep(DELAY)
 
@@ -285,7 +336,7 @@ def save_ah_to_csv(orders, save_path):
             for order in orders:
                 writer.writerow(order)
 
-        m.echo(f"Saved CSV order data to {save_path}")
+        # m.echo(f"Saved CSV order data to {save_path}")
 
     except Exception as e:
         m.echo(f"Error writing CSV: {e}")
@@ -302,9 +353,9 @@ def get_ah_data(uid_name="fast", max_pages=1000, item_search=" "):
     save_path = os.path.join(
         r"C:\Users\User\AppData\Roaming\.minecraft\minescript", file_name
     )
-    m.echo("Initializing AH search...")
+    # m.echo("Initializing AH search...")
     init_search_all_ah(item_search)
-    m.echo("Extracting AH data...")
+    # m.echo("Extracting AH data...")
     orders = search_all_ah(max_pages=max_pages, uid_name=uid_name)
     m.echo(f"Processing {len(orders)} AH entries...")
     data_list = []
@@ -314,7 +365,7 @@ def get_ah_data(uid_name="fast", max_pages=1000, item_search=" "):
         if data:
             data_list.append(data)
 
-    m.echo(f"Saving AH data to {save_path}...")
+    # m.echo(f"Saving AH data to {save_path}...")
     # save_ah_to_csv(data_list, save_path)
-    m.echo(f"Saved raw AH data to {save_path}")
+    # m.echo(f"Saved raw AH data to {save_path}")
     Screen.close_screen()
